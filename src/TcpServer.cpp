@@ -32,7 +32,7 @@ void TcpServer::Run()
     while (1)
     {
         int nready = epoll_wait(m_epollfd,events,MAX_EVENT_NUMBER,-1);
-        printf("server ready:%d\n",nready);
+        // printf("server ready:%d\n",nready);
         if(nready == -1)
         {
             err_sys(epoll error);
@@ -60,19 +60,34 @@ void TcpServer::Run()
                 pthread_mutex_unlock(&mutex);
 
                 setnonblocking(confd);
-                printf("connect from %s,port %d\n",inet_ntop(AF_INET,&conaddr.sin_addr,hostname,sizeof(hostname)),\
-                        ntohs(conaddr.sin_port));
+
+                if(pairing == false)
+                {
+                    pairfd = confd;
+                    pairing = true;
+                }else
+                {
+                    pairlist[pairfd] = confd;
+                    pairlist[confd] = pairfd;
+                    pairing = false;
+                }
+
+                // printf("connect from %s,port %d\n",inet_ntop(AF_INET,&conaddr.sin_addr,hostname,sizeof(hostname)),\
+                //         ntohs(conaddr.sin_port));
             }else
             {
                 // 处理接收到的数据
                 if(events[i].events & EPOLLIN)
                 {
-                    argStruct arg;
-                    arg.srv = this;
-                    arg.fd = tmpfd;
-                    // dealwithread(&arg);
+                    argStruct *arg = (argStruct*)malloc(sizeof(argStruct));
+                    arg->srv = this;
+                    arg->fd = tmpfd;
+                    thpool->thPoolAddWork(dealwithread,(void*)arg);
+                }else if(events[i].events & EPOLLERR || events[i].events & EPOLLHUP)
+                {
+                    printf("=====close fd:%d=====\n",events[i].data.fd);
 
-                    thpool->thPoolAddWork(dealwithread,(void*)&arg);
+                    close(events[i].data.fd);
                 }
             }
         }
@@ -88,6 +103,14 @@ void TcpServer::dealwithread(void* arg)
     char buff[MAXLEN];
     argStruct *info = (argStruct*)arg;
     int fd = info->fd;
+    int peerfd = info->srv->pairlist[fd];
+
+    if(peerfd == 0)
+    {
+        printf("%d not in pairlist!\n",fd);
+        return;
+    }
+
     pthread_mutex_t mutex = info->srv->mutex;
     int m_epollfd = info->srv->m_epollfd;
     
@@ -98,26 +121,46 @@ void TcpServer::dealwithread(void* arg)
     {
         if(errno == ECONNRESET)
         {
-            printf("======close fd:%d========\n",fd);
-            close(fd);
+            printf("======1 close fd:<%d %d>========\n",fd,peerfd);
             pthread_mutex_lock(&mutex);
             epoll_ctl(m_epollfd,EPOLL_CTL_DEL,fd,NULL);
             pthread_mutex_unlock(&mutex);
+            close(fd);
+
+            info->srv->pairlist.erase(fd);
+            info->srv->pairlist[peerfd] = -1;// 自身标记为-1
         }else{
-            err_sys(read error~);
+            printf("====read fd:%d====\n",fd);
+            err_msg(read error~);
         }
     }else if(n == 0)
     {
-        printf("======close fd:%d========\n",fd);
-        close(fd);
+        printf("======2 close fd:<%d %d>========\n",fd,peerfd);
         pthread_mutex_lock(&mutex);
         epoll_ctl(m_epollfd,EPOLL_CTL_DEL,fd,NULL);
         pthread_mutex_unlock(&mutex);
-    }else{
-        // printf("======%d========\n",__LINE__);
-        write(fd,buff,n);
+        close(fd);
+
+        info->srv->pairlist.erase(fd);
+        info->srv->pairlist[peerfd] = -1;
+    }else
+    {
+        // 如果发现peerfd不存在了，就清除本身，
+        if(peerfd == -1)
+        {
+            printf("======3 close fd:<%d %d>========\n",fd,peerfd);
+            pthread_mutex_lock(&mutex);
+            epoll_ctl(m_epollfd,EPOLL_CTL_DEL,fd,NULL);
+            pthread_mutex_unlock(&mutex);
+            close(fd);
+            info->srv->pairlist.erase(fd);
+        }else
+        {
+            write(peerfd,buff,n);
+        }
  
     }
+    free(info);
 }
 
 void TcpServer::setnonblocking(int fd)

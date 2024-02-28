@@ -1,5 +1,4 @@
 #include "TcpClient.h"
-
 TcpClient::TcpClient(const char* host,const unsigned short port)
 {
     bzero(&m_servAddr,sizeof(sockaddr_in));

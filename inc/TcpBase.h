@@ -12,6 +12,8 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 #define err_sys(msg) do { perror(#msg); exit(EXIT_FAILURE); } while (0)
+#define err_msg(msg) do { perror(#msg);} while (0)
+#define PORT    9877
 
 class tcpBase
 {

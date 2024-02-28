@@ -14,5 +14,6 @@ add_library(locker STATIC
         lib/locker/CLEvent.h)
 
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc)
+target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils)
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/thread_poll)
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/locker)

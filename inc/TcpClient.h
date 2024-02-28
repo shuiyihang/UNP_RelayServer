@@ -10,7 +10,7 @@ private:
     sockaddr_in m_servAddr;
 public:
     int m_sockfd;
-    TcpClient(const char* host,const unsigned short port);
+    TcpClient(const char* host = "127.0.0.1",const unsigned short port = PORT);
     ~TcpClient() = default;
 
     int Connect();
