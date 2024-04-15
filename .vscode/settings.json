@@ -1,5 +1,10 @@
 {
     "files.associations": {
-        "fstream": "cpp"
+        "fstream": "cpp",
+        "*.tcc": "cpp",
+        "cassert": "cpp",
+        "unordered_map": "cpp",
+        "new": "cpp",
+        "chrono": "cpp"
     }
 }

@@ -6,5 +6,6 @@ int main()
 
     server.Run();
 
+    printf("server stop runing...\n");
     return 0;
 }

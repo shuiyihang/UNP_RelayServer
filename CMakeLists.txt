@@ -13,6 +13,22 @@ add_library(locker STATIC
         lib/locker/CLEvent.cpp
         lib/locker/CLEvent.h)
 
+add_library(utils STATIC
+        utils/utils.cpp
+        utils/utils.h
+        utils/session.cpp
+        utils/session.h)
+
+
+
+# include_directories  路径增加到全局，对整个项目有效
+# include_directories(${CMAKE_CURRENT_SOURCE_DIR}/inc)
+
+# include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/thread_poll)
+# include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/locker)
+
+
+# target_include_directories
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc)
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils)
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/thread_poll)

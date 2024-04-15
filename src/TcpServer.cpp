@@ -1,8 +1,9 @@
 #include "TcpServer.h"
-
+#include <cassert>
 
 TcpServer::TcpServer(const unsigned short port)
 {
+    int ret = 0;
     sockaddr_in addr;
     bzero(&addr,sizeof(addr));
     addr.sin_family = AF_INET;
@@ -15,25 +16,155 @@ TcpServer::TcpServer(const unsigned short port)
 
     m_epollfd = epoll_create(5);
 
-    epoll_event event;
-    event.events = EPOLLIN;
-    event.data.fd = m_listenfd;
-    epoll_ctl(m_epollfd,EPOLL_CTL_ADD,m_listenfd,&event);
-    setnonblocking(m_listenfd);
+    utils.addfd(m_epollfd,m_listenfd,EPOLLIN);
+
+    ret = socketpair(PF_UNIX,SOCK_STREAM,0,m_pipefd);
+    assert(ret != -1);
+    utils.setnonblocking(m_pipefd[1]);
+
+    sessions = new CLSession[MAX_FD];
+    CLSession::m_epollfd = m_epollfd;
+
+    utils.addfd(m_epollfd,m_pipefd[0],EPOLLIN | EPOLLRDHUP);
+
+    utils.addsig(SIGPIPE,true,SIG_IGN);
+    utils.addsig(SIGTERM,false);
+    utils.addsig(SIGALRM,false);
+    alarm(TIMESLOT);
+    utils.u_pipefd = m_pipefd;
 
     thpool = new CLThreadPool(THR_NUMS);
     pthread_mutex_init(&mutex,NULL);
 
 }
 
+bool TcpServer::deal_signal(bool& timeout,bool& stop_srv)
+{
+    char signals[1024];
+    int ret = recv(m_pipefd[0],signals,sizeof(signals),0);
+    if(ret == -1)
+    {
+        return false;
+    }else if(ret == 0)
+    {
+        return false;
+    }else
+    {
+        for(int i = 0;i < ret;i++)
+        {
+            switch (signals[i])
+            {
+                case SIGALRM:
+                {
+                    timeout = true;
+                    break;
+                }
+                case SIGTERM:
+                {
+                    stop_srv = true;
+                    break;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+void TcpServer::deal_session_connect()
+{
+    // 接受新的连接
+    sockaddr_in conaddr;
+    socklen_t len = sizeof(conaddr);
+    char hostname[128];
+
+    int confd = accept(m_listenfd,(sockaddr*)&conaddr,&len);
+
+    if(CLSession::m_session_count >= MAX_FD)
+    {
+        return;
+    }
+
+    pthread_mutex_lock(&mutex);
+    utils.addfd(m_epollfd,confd,EPOLLIN | EPOLLET | EPOLLONESHOT);// 改用边缘触发模式
+    pthread_mutex_unlock(&mutex);
+
+    CLSession::m_session_count++;
+    sessions[confd].init();
+    sessions[confd].m_self_fd = confd;
+
+    if(pairing == false)
+    {
+        pairfd = confd;
+        pairing = true;
+    }else
+    {
+        sessions[pairfd].m_peer_fd = confd;
+        sessions[confd].m_peer_fd = pairfd;
+        pairing = false;
+    }
+}
+void TcpServer::deal_read(int sockfd)
+{
+    CLSession* handle = static_cast<CLSession*>(sessions+sockfd);
+    handle->m_rw_st = 1;
+    thpool->thPoolAddWork(CLSession::process,sessions+sockfd);
+    while(1)
+    {
+        if(handle->m_done)
+        {
+            if(handle->m_occur_err)
+            {
+                utils.delfd(m_epollfd,handle->m_self_fd);
+                utils.delfd(m_epollfd,handle->m_peer_fd);
+                close(handle->m_self_fd);
+                close(handle->m_peer_fd);
+
+                auto now = std::chrono::system_clock::now();
+                std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+                auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+
+                printf("close fd in line: %d,time:%ld\n",__LINE__,us);
+                CLSession::m_session_count -= 2;
+            }
+            handle->m_done = 0;
+            break;
+        }
+    }
+}
+
+void TcpServer::deal_write(int sockfd)
+{
+    // 写出错，关掉peer
+    CLSession* handle = static_cast<CLSession*>(sessions+sockfd);
+    handle->m_rw_st = 0;
+    thpool->thPoolAddWork(CLSession::process,sessions+sockfd);
+    while(1)
+    {
+        if(handle->m_done)
+        {
+            if(handle->m_occur_err)
+            {
+                utils.delfd(m_epollfd,handle->m_self_fd);
+                utils.delfd(m_epollfd,handle->m_peer_fd);
+                close(handle->m_self_fd);
+                close(handle->m_peer_fd);
+                printf("close fd in line: %d\n",__LINE__);
+                CLSession::m_session_count -= 2;
+            }
+            handle->m_done = 0;
+            break;
+        }
+    }
+}
 void TcpServer::Run()
 {
+    bool timeout = false;
+    bool stop_srv = false;
 
-    while (1)
+    while (false == stop_srv)
     {
         int nready = epoll_wait(m_epollfd,events,MAX_EVENT_NUMBER,-1);
-        // printf("server ready:%d\n",nready);
-        if(nready == -1)
+        if(nready == -1 && errno != EINTR)
         {
             err_sys(epoll error);
             break;
@@ -44,128 +175,28 @@ void TcpServer::Run()
             int tmpfd = events[i].data.fd;
             if(tmpfd == m_listenfd)
             {
-                // 接受新的连接
-                sockaddr_in conaddr;
-                socklen_t len = sizeof(conaddr);
-                char hostname[128];
-
-                epoll_event event;
-                int confd = accept(tmpfd,(sockaddr*)&conaddr,&len);
-                
-                event.events = EPOLLIN | EPOLLET;// 改用边缘触发模式
-                event.data.fd = confd;
-
-                pthread_mutex_lock(&mutex);
-                epoll_ctl(m_epollfd,EPOLL_CTL_ADD,confd,&event);
-                pthread_mutex_unlock(&mutex);
-
-                setnonblocking(confd);
-
-                if(pairing == false)
-                {
-                    pairfd = confd;
-                    pairing = true;
-                }else
-                {
-                    pairlist[pairfd] = confd;
-                    pairlist[confd] = pairfd;
-                    pairing = false;
-                }
-
-                // printf("connect from %s,port %d\n",inet_ntop(AF_INET,&conaddr.sin_addr,hostname,sizeof(hostname)),\
-                //         ntohs(conaddr.sin_port));
-            }else
+                deal_session_connect();
+            }else if(tmpfd == m_pipefd[0] && events[i].events & EPOLLIN)
             {
-                // 处理接收到的数据
-                if(events[i].events & EPOLLIN)
-                {
-                    argStruct *arg = (argStruct*)malloc(sizeof(argStruct));
-                    arg->srv = this;
-                    arg->fd = tmpfd;
-                    thpool->thPoolAddWork(dealwithread,(void*)arg);
-                }else if(events[i].events & EPOLLERR || events[i].events & EPOLLHUP)
-                {
-                    printf("=====close fd:%d=====\n",events[i].data.fd);
-
-                    close(events[i].data.fd);
-                }
+                deal_signal(timeout,stop_srv);
+            }else if(events[i].events & EPOLLIN)
+            {
+                deal_read(tmpfd);
+            }else if(events[i].events & EPOLLOUT)
+            {
+                deal_write(tmpfd);
+            }else if(events[i].events & (EPOLLERR|EPOLLHUP))
+            {
+                utils.delfd(m_epollfd,tmpfd);
+                utils.delfd(m_epollfd,sessions[tmpfd].m_peer_fd);
+                close(tmpfd);
+                close(sessions[tmpfd].m_peer_fd);
+                printf("close fd in line: %d\n",__LINE__);
+                CLSession::m_session_count -= 2;
             }
         }
     }
     
    
     
-}
-
-void TcpServer::dealwithread(void* arg)
-{
-    #define MAXLEN 1024
-    char buff[MAXLEN];
-    argStruct *info = (argStruct*)arg;
-    int fd = info->fd;
-    int peerfd = info->srv->pairlist[fd];
-
-    if(peerfd == 0)
-    {
-        printf("%d not in pairlist!\n",fd);
-        return;
-    }
-
-    pthread_mutex_t mutex = info->srv->mutex;
-    int m_epollfd = info->srv->m_epollfd;
-    
-    // printf("======%d========\n",__LINE__);
-    // 读数据，然后写回客户
-    int n;
-    if((n = read(fd,buff,MAXLEN)) < 0)
-    {
-        if(errno == ECONNRESET)
-        {
-            printf("======1 close fd:<%d %d>========\n",fd,peerfd);
-            pthread_mutex_lock(&mutex);
-            epoll_ctl(m_epollfd,EPOLL_CTL_DEL,fd,NULL);
-            pthread_mutex_unlock(&mutex);
-            close(fd);
-
-            info->srv->pairlist.erase(fd);
-            info->srv->pairlist[peerfd] = -1;// 自身标记为-1
-        }else{
-            printf("====read fd:%d====\n",fd);
-            err_msg(read error~);
-        }
-    }else if(n == 0)
-    {
-        printf("======2 close fd:<%d %d>========\n",fd,peerfd);
-        pthread_mutex_lock(&mutex);
-        epoll_ctl(m_epollfd,EPOLL_CTL_DEL,fd,NULL);
-        pthread_mutex_unlock(&mutex);
-        close(fd);
-
-        info->srv->pairlist.erase(fd);
-        info->srv->pairlist[peerfd] = -1;
-    }else
-    {
-        // 如果发现peerfd不存在了，就清除本身，
-        if(peerfd == -1)
-        {
-            printf("======3 close fd:<%d %d>========\n",fd,peerfd);
-            pthread_mutex_lock(&mutex);
-            epoll_ctl(m_epollfd,EPOLL_CTL_DEL,fd,NULL);
-            pthread_mutex_unlock(&mutex);
-            close(fd);
-            info->srv->pairlist.erase(fd);
-        }else
-        {
-            write(peerfd,buff,n);
-        }
- 
-    }
-    free(info);
-}
-
-void TcpServer::setnonblocking(int fd)
-{
-    int flags = fcntl(fd,F_GETFL);
-    int option = flags | O_NONBLOCK;
-    fcntl(fd,F_SETFL,option);
 }

@@ -47,3 +47,23 @@ int TcpClient::Receive(char* msg,int maxlen)
     ret = read(m_sockfd,msg,maxlen);
     return ret;
 }
+
+bool TcpClient::read_data()
+{
+    int byte_read = 0;
+    byte_read = recv(m_sockfd,m_read_buf,READ_BUFFER_SIZE,0);
+    if(byte_read == -1)
+    {
+        if(errno != EAGAIN)
+        {
+            err_msg(read_data);
+            return false;
+        }
+    }else if(byte_read == 0)
+    {
+        printf("read_data 0\n");
+        return false;
+    }
+
+    return true;
+}
