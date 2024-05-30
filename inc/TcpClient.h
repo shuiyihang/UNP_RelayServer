@@ -3,6 +3,8 @@
 
 #include "TcpBase.h"
 
+const int MAX_EVENT_NUMBER = 10000; //最大事件数
+
 #define WRITE_BUFFER_SIZE   1024
 #define READ_BUFFER_SIZE    1024
 

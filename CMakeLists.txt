@@ -2,7 +2,7 @@ cmake_minimum_required (VERSION 3.5)
 project(unp_work)
 
 # 设置编译选项
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
 
 
 # include_directories  路径增加到全局，对整个项目有效

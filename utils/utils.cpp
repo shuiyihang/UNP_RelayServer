@@ -1,6 +1,7 @@
 #include "utils.h"
 #include <signal.h>
 #include <cstring>
+#include <stdio.h>
 
 int* CLUtils::u_pipefd = nullptr;
 
@@ -35,8 +36,9 @@ void CLUtils::sig_handler(int sig)
 {
     int save_errno = errno;
     int msg = sig;
-    send(u_pipefd[1],(char*)&msg,1,0);
+    int ret = send(u_pipefd[1],(char*)&msg,1,0);
     errno = save_errno;
+    printf("sig:%d,ret:%d,fd:%d\n",sig,ret,u_pipefd[1]);
 }
 
 void CLUtils::addsig(int sig,bool restart,sig_func handle)

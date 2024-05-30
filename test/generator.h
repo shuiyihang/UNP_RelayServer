@@ -31,6 +31,9 @@ public:
 
     bool m_running;
 
+    bool m_norm_state;
+    int no_response_times;
+
     static int m_out_client_nums;// epoll out状态下的数量
     long long m_w_file_pos;
 
@@ -40,7 +43,7 @@ public:
     int m_history_clients[HISTORY_SIZE];
     long m_test_nums;
 private:
-    epoll_event m_events[100];
+    epoll_event m_events[MAX_EVENT_NUMBER];
     CLThreadPool* m_thpool;
     std::unordered_map<int,int>m_map_table;
 public:
@@ -60,7 +63,7 @@ public:
     static void recordTask(void *arg);
     static void writeTask(void *arg);
 
-    static void* sendTask(void *arg);
+    void sendTask(void *arg);
     void run();
 
 private:
@@ -79,4 +82,6 @@ struct arg_struct
 
 
 
-#define ONE_SEND_DEBUG
+// #define ONE_SEND_DEBUG
+
+// #define ENABLE_CONT_SAVE

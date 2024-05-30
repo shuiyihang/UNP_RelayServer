@@ -39,6 +39,8 @@ void CLGenerator::init(int session,int talklen)
     m_sessions = session;
     m_talklen = talklen;
     m_running = true;
+    m_norm_state = false;
+    no_response_times = 0;
     m_w_file_pos = 0;
     srand(time(NULL));// 使用当前时间作为种子
     memset(m_history_clients,0,sizeof(int)*HISTORY_SIZE);
@@ -75,10 +77,15 @@ void CLGenerator::init(int session,int talklen)
     ret = socketpair(PF_UNIX,SOCK_STREAM,0,m_pipefd);
     assert(ret != -1);
     utils.setnonblocking(m_pipefd[1]);
-    utils.addfd(m_epollfd,m_pipefd[0],EPOLLIN | EPOLLRDHUP);
+
+    utils.addfd(m_epollfd,m_pipefd[0],EPOLLIN);
+
+    utils.u_pipefd = m_pipefd;
+    // printf("recv fd:%d,send fd:%d\n",m_pipefd[0],m_pipefd[1]);
+    
     utils.addsig(SIGPIPE,true,SIG_IGN);
     utils.addsig(SIGINT,false);
-    utils.u_pipefd = m_pipefd;
+    utils.addsig(SIGALRM,false);
 
     m_thpool = new CLThreadPool(THR_NUMS);
     
@@ -120,25 +127,27 @@ void CLGenerator::run()
 {
     bool timeout = false;
     
-    pthread_t send_thread;
-    pthread_create(&send_thread,NULL,sendTask,this);
-
+    alarm(TIMESLOT);
     while (m_running)
     {
-        int nready = epoll_wait(m_epollfd,m_events,100,-1);
+        sendTask(this);
+        int nready = epoll_wait(m_epollfd,m_events,MAX_EVENT_NUMBER,-1);
         for(int i = 0; i < nready;i++)
         {
             int tmpfd = m_events[i].data.fd;
             if(tmpfd == m_pipefd[0] && m_events[i].events & EPOLLIN)
             {
+                // printf("deal_signal\n");
                 deal_signal(timeout);
             }else if(m_events[i].events & EPOLLIN)
             {
                 deal_read(tmpfd);
+                m_norm_state = true;
             }else if(m_events[i].events & EPOLLOUT)
             {
                 // printf("trigger sockfd:%d EPOLLOUT\n",tmpfd);
                 deal_write(tmpfd);
+                m_norm_state = true;// 有数据正常发送接收
             }else if(m_events[i].events & (EPOLLERR|EPOLLHUP))
             {
                 utils.delfd(m_epollfd,tmpfd);
@@ -146,21 +155,46 @@ void CLGenerator::run()
                 printf("close fd in line: %d\n",__LINE__);
             }
         }
+
+        if(timeout)
+        {
+            if(false == m_norm_state)
+            {
+                no_response_times++;
+                if(no_response_times > 10)
+                {
+                    m_running = false;
+                }
+                auto now = std::chrono::system_clock::now();
+                std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+                struct std::tm *local_time = std::localtime(&now_time);
+
+                printf("%02d-%02d %02d:%02d:%02d: no data in/out,code seem enter while state\n",local_time->tm_mon + 1,
+                        local_time->tm_mday,
+                        local_time->tm_hour,
+                        local_time->tm_min,
+                        local_time->tm_sec);
+            }
+            m_norm_state = false;
+            timeout = false;
+            no_response_times = 0;
+            alarm(TIMESLOT);
+        }
+        
     }
 
     m_thpool->thPoolWait();
-    pthread_join(send_thread,NULL);
     pthread_mutex_destroy(&m_op_mutex);
     m_thpool->thPoolDestroy();
     fclose(m_fp);
 
 }
 
-void* CLGenerator::sendTask(void *arg)
+void CLGenerator::sendTask(void *arg)
 {
     CLGenerator *handle = (CLGenerator*)arg;
 
-    while (handle->m_running)
+    // while (handle->m_running)
     {
         int client_idx = rand()%(handle->m_sessions*2);
         timeval timestamp;
@@ -178,16 +212,9 @@ void* CLGenerator::sendTask(void *arg)
         // TODO会话数太少可能挑不出来
         if(rand_ret == 1)
         {
-            continue;
+            return;
         }
-        // print_pos++;
-        // if(print_pos > 8000)
-        // {
-        //     print_pos = 0;
-        //     printf("sockfd:%d m_io_state:%d m_out_client_nums:%d\n",handle->m_clients[client_idx].m_sockfd,\
-        //                                                             handle->m_clients[client_idx].m_io_state,\
-        //                                                             m_out_client_nums);
-        // }
+
         if(handle->m_clients[client_idx].m_io_state == 0)
         {
             if(m_out_client_nums < MAX_OUT_NUMS)
@@ -237,6 +264,10 @@ void* CLGenerator::sendTask(void *arg)
                 m_out_client_nums++;
                 handle->m_clients[client_idx].m_io_state = 1;
                 handle->utils.modfd(handle->m_epollfd,handle->m_clients[client_idx].m_sockfd,EPOLLOUT);
+                if(handle->m_pipefd[0] == handle->m_clients[client_idx].m_sockfd)
+                {
+                    printf("errro!!!!\n");
+                }
                 // printf("wait sockfd:%d EPOLLOUT\n",handle->m_clients[client_idx].m_sockfd);
             }
         }
@@ -358,14 +389,14 @@ void CLGenerator::recordTask(void *arg)
                 client->m_wait_pure_data = 1;
 
                 deal_idx += HEAD_LEN;
-
+#ifdef ENABLE_CONT_SAVE
                 // 互斥访问log文件
                 pthread_mutex_lock(&handle->m_op_mutex);
                 client->m_w_format_pos = handle->m_w_file_pos;
                 client->m_w_file_pos = handle->m_w_file_pos + FORMAT_LEN;
                 handle->m_w_file_pos += (FORMAT_LEN + client->m_data_len + TAIL_LEN);// 获取一个写的独占区域 FORMAT_LEN:标准格式提示
                 pthread_mutex_unlock(&handle->m_op_mutex);
-
+#endif
                 // printf("match head,m_data_len:%d\n",client->m_data_len);
             }else
             {
@@ -381,7 +412,10 @@ void CLGenerator::recordTask(void *arg)
         {
             if(client->m_data_len > 0)
             {
+
                 int need_len = (client->m_data_len > (client->m_read_idx - deal_idx)) ? (client->m_read_idx - deal_idx):client->m_data_len;
+
+#ifdef ENABLE_CONT_SAVE
 
                 pthread_mutex_lock(&handle->m_op_mutex);
 
@@ -417,10 +451,22 @@ void CLGenerator::recordTask(void *arg)
                 }
 
                 pthread_mutex_unlock(&handle->m_op_mutex);
+#else
+                client->m_data_len -= need_len;
+                deal_idx += need_len;
+                if(client->m_data_len <= 0)
+                {
+                    client->m_wait_pure_data = 0;
+                }
+#endif
             }
+
         }
     }
+
+#ifdef ENABLE_CONT_SAVE
     fflush(handle->m_fp);// 防止日志丢失
+#endif
     client->m_done = true;
 }
 
@@ -496,6 +542,7 @@ bool CLGenerator::deal_signal(bool& timeout)
                 case SIGALRM:
                 {
                     timeout = true;
+                    // printf("time out!!!\n");
                     break;
                 }
                 case SIGINT:
