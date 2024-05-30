@@ -19,8 +19,16 @@ public:
     char m_read_buf[READ_BUFFER_SIZE];
     int m_sockfd;
 
+    int m_io_state;// in or out
+    struct iovec m_iv[2];
     int m_done;
     int m_occur_err;
+
+    int m_wait_pure_data;// 等待接收数据
+    int m_data_len;
+    long m_start_time_us;
+    long long m_w_file_pos;
+    long long m_w_format_pos;
 public:
     TcpClient(const char* host = "127.0.0.1",const unsigned short port = PORT);
     ~TcpClient() = default;
@@ -30,7 +38,7 @@ public:
     void Send(const char* msg,int n);
     int Receive(char* msg,int maxlen);
 
-    bool read_data();
+    bool read_data(size_t len);
     bool write_data();
 };
 

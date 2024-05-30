@@ -29,6 +29,7 @@ TcpServer::TcpServer(const unsigned short port)
 
     utils.addsig(SIGPIPE,true,SIG_IGN);
     utils.addsig(SIGTERM,false);
+    utils.addsig(SIGINT,false);
     utils.addsig(SIGALRM,false);
     alarm(TIMESLOT);
     utils.u_pipefd = m_pipefd;
@@ -59,6 +60,7 @@ bool TcpServer::deal_signal(bool& timeout,bool& stop_srv)
                     timeout = true;
                     break;
                 }
+                case SIGINT:
                 case SIGTERM:
                 {
                     stop_srv = true;
@@ -85,7 +87,8 @@ void TcpServer::deal_session_connect()
     }
 
     pthread_mutex_lock(&mutex);
-    utils.addfd(m_epollfd,confd,EPOLLIN | EPOLLET | EPOLLONESHOT);// 改用边缘触发模式
+    utils.addfd(m_epollfd,confd,EPOLLIN);//syh
+    // utils.addfd(m_epollfd,confd,EPOLLIN|EPOLLONESHOT);
     pthread_mutex_unlock(&mutex);
 
     CLSession::m_session_count++;
@@ -108,6 +111,7 @@ void TcpServer::deal_read(int sockfd)
     CLSession* handle = static_cast<CLSession*>(sessions+sockfd);
     handle->m_rw_st = 1;
     thpool->thPoolAddWork(CLSession::process,sessions+sockfd);
+    // printf("+++srv detect sockfd:%d data in\n",sockfd);
     while(1)
     {
         if(handle->m_done)
@@ -115,21 +119,27 @@ void TcpServer::deal_read(int sockfd)
             if(handle->m_occur_err)
             {
                 utils.delfd(m_epollfd,handle->m_self_fd);
-                utils.delfd(m_epollfd,handle->m_peer_fd);
                 close(handle->m_self_fd);
-                close(handle->m_peer_fd);
+                CLSession::m_session_count--;
 
+                if(handle->m_peer_fd != -1)
+                {
+                    utils.delfd(m_epollfd,handle->m_peer_fd);
+                    close(handle->m_peer_fd);
+                    CLSession::m_session_count--;
+                }
                 auto now = std::chrono::system_clock::now();
                 std::time_t now_c = std::chrono::system_clock::to_time_t(now);
                 auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
 
                 printf("close fd in line: %d,time:%ld\n",__LINE__,us);
-                CLSession::m_session_count -= 2;
+                
             }
             handle->m_done = 0;
             break;
         }
     }
+    // printf("---srv detect sockfd data in\n");
 }
 
 void TcpServer::deal_write(int sockfd)
@@ -138,6 +148,7 @@ void TcpServer::deal_write(int sockfd)
     CLSession* handle = static_cast<CLSession*>(sessions+sockfd);
     handle->m_rw_st = 0;
     thpool->thPoolAddWork(CLSession::process,sessions+sockfd);
+    printf("srv detect sockfd:%d data out\n",sockfd);
     while(1)
     {
         if(handle->m_done)
@@ -145,11 +156,15 @@ void TcpServer::deal_write(int sockfd)
             if(handle->m_occur_err)
             {
                 utils.delfd(m_epollfd,handle->m_self_fd);
-                utils.delfd(m_epollfd,handle->m_peer_fd);
                 close(handle->m_self_fd);
-                close(handle->m_peer_fd);
+                CLSession::m_session_count--;
+                if(handle->m_peer_fd != -1)
+                {
+                    utils.delfd(m_epollfd,handle->m_peer_fd);
+                    close(handle->m_peer_fd);
+                    CLSession::m_session_count--;
+                }
                 printf("close fd in line: %d\n",__LINE__);
-                CLSession::m_session_count -= 2;
             }
             handle->m_done = 0;
             break;

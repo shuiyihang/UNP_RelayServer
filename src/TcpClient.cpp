@@ -1,6 +1,11 @@
 #include "TcpClient.h"
+
 TcpClient::TcpClient(const char* host,const unsigned short port)
 {
+    m_done = false;
+    m_occur_err = false;
+
+
     bzero(&m_servAddr,sizeof(sockaddr_in));
     m_sockfd = socket(AF_INET,SOCK_STREAM,0);
 
@@ -13,6 +18,11 @@ int TcpClient::Connect()
 {
     int ret;
     ret = connect(m_sockfd,(sockaddr*)&m_servAddr,sizeof(m_servAddr));
+
+    m_data_len = 0;
+    m_io_state = 0;
+    m_wait_pure_data = 0;
+
     return ret;
 }
 
@@ -48,10 +58,14 @@ int TcpClient::Receive(char* msg,int maxlen)
     return ret;
 }
 
-bool TcpClient::read_data()
+bool TcpClient::read_data(size_t len)
 {
     int byte_read = 0;
-    byte_read = recv(m_sockfd,m_read_buf,READ_BUFFER_SIZE,0);
+    // These calls return the number of bytes received, or -1 if an error occurred
+    // The value 0 may also be returned if the requested number of bytes to receive from a stream socket was 0
+    assert(len <= READ_BUFFER_SIZE);
+
+    byte_read = recv(m_sockfd,m_read_buf,len,0);
     if(byte_read == -1)
     {
         if(errno != EAGAIN)
@@ -64,6 +78,6 @@ bool TcpClient::read_data()
         printf("read_data 0\n");
         return false;
     }
-
+    m_read_idx = byte_read;
     return true;
 }

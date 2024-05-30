@@ -21,7 +21,9 @@ public:
     int m_peer_fd;
     int m_self_fd;
     int m_write_idx;
+    int m_w_offset;
     char m_write_buf[WRITE_BUFFER_SIZE];
+
     int m_read_idx;
     char m_read_buf[READ_BUFFER_SIZE];
 

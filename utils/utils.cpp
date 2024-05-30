@@ -14,7 +14,8 @@ void CLUtilsBase::modfd(int epollfd,int fd,unsigned int ev)
 {
     epoll_event event;
     event.data.fd = fd;
-    event.events = ev | EPOLLONESHOT | EPOLLRDHUP | EPOLLET;
+    event.events = ev | EPOLLRDHUP;//syh
+    // event.events = ev|EPOLLRDHUP|EPOLLONESHOT;
     epoll_ctl(epollfd,EPOLL_CTL_MOD,fd,&event);
 }
 void CLUtilsBase::addfd(int epollfd,int fd,unsigned int events)

@@ -12,7 +12,7 @@ int main(int argc,char* argv[])
     {
         session = atoi(argv[1]);
     }
-
+    printf("session:%d,talklen:%d\n",session,talklen);
     CLGenerator* trigger = new CLGenerator;
     trigger->init(session,talklen);
 

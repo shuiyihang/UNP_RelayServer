@@ -1,6 +1,13 @@
 cmake_minimum_required (VERSION 3.5)
 project(unp_work)
 
+# 设置编译选项
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
+
+# include_directories  路径增加到全局，对整个项目有效
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/inc)
+
 add_subdirectory(src)
 add_subdirectory(test)
 
@@ -21,15 +28,13 @@ add_library(utils STATIC
 
 
 
-# include_directories  路径增加到全局，对整个项目有效
-# include_directories(${CMAKE_CURRENT_SOURCE_DIR}/inc)
 
 # include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/thread_poll)
 # include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/locker)
 
 
 # target_include_directories
-target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc)
+# target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc)
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils)
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/thread_poll)
 target_include_directories(unpWork PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/locker)

@@ -5,6 +5,7 @@
 
 CLEvent::CLEvent(int bSemaphore)
 {
+    m_flag = 0;
     this->bSemaphore = bSemaphore;
     pthread_mutex_init(&m_mutex,0);
     pthread_cond_init(&m_cond,0);

@@ -15,6 +15,7 @@
 
 #include <chrono>
 #include <ctime>
+#include <assert.h>
 
 #define err_sys(msg) do { perror(#msg); exit(EXIT_FAILURE); } while (0)
 #define err_msg(msg) do { perror(#msg);} while (0)
